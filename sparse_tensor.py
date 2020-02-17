@@ -114,26 +114,7 @@ class SparseJacobian:
     def __add__(self, other):
         def add_fn(sparses):
             return sparses[0] + sparses[1]
-
-        def add_sparse_dense(params):
-            dummy_sparse = SparseJacobian._to_sparse(params[1]).coalesce()
-            values = dummy_sparse.values()
-            index0, index1 = dummy_sparse.indices()
-            indices1 = set(list(zip(index0.numpy().tolist(), index1.numpy().tolist())))
-            index0, index1 = params[0].coalesce().indices()
-            indices2 = set(list(zip(index0.numpy().tolist(), index1.numpy().tolist())))
-            final_indices = list(indices1 | indices2)
-            final_values = []
-            for index0, index1 in final_indices:
-                final_values.append(
-                    dummy_sparse[index0][index1] + params[0][index0][index1]
-                )
-            return SparseJacobian._get_sparse_typeclass(params[1][0])(
-                torch.tensor(list(zip(*final_indices))),
-                torch.tensor(final_values),
-                params[1].shape,
-            )
-
+  
         if isinstance(other, SparseJacobian):
             added_jacobians = SparseJacobian.map_on_batch(
                 add_fn,
@@ -141,11 +122,19 @@ class SparseJacobian:
                 self.batch_size,
             )
         else:
-            added_jacobians = SparseJacobian.map_on_batch(
-                add_sparse_dense,
-                list(zip(self.sparse_jacobians, other)),
-                self.batch_size,
-            )
+            if len(other.shape) < 3:
+                #add_sparse_broadcast_fn = add_sparse_broadcast(other)
+                added_jacobians = SparseJacobian.map_on_batch(
+                    lambda x: add_fn([x, other.to_sparse()]),
+                    self.sparse_jacobians,
+                    self.batch_size,
+                )
+            else:
+                added_jacobians = SparseJacobian.map_on_batch(
+                    lambda params: add_fn([params[0], params[1].to_sparse()]),
+                    list(zip(self.sparse_jacobians, other)),
+                    self.batch_size,
+                )
 
         return SparseJacobian(
             self.batch_size, self.shape, sparse_jacobians=added_jacobians
@@ -155,25 +144,6 @@ class SparseJacobian:
         def sub_fn(sparses):
             return sparses[0] - sparses[1]
 
-        def sub_sparse_dense(params):
-            dummy_sparse = SparseJacobian._to_sparse(params[1]).coalesce()
-            values = dummy_sparse.values()
-            index0, index1 = dummy_sparse.indices()
-            indices1 = set(list(zip(index0.numpy().tolist(), index1.numpy().tolist())))
-            index0, index1 = params[0].coalesce().indices()
-            indices2 = set(list(zip(index0.numpy().tolist(), index1.numpy().tolist())))
-            final_indices = list(indices1 | indices2)
-            final_values = []
-            for index0, index1 in final_indices:
-                final_values.append(
-                    params[0][index0][index1] - dummy_sparse[index0][index1]
-                )
-            return SparseJacobian._get_sparse_typeclass(params[1][0])(
-                torch.tensor(list(zip(*final_indices))),
-                torch.tensor(final_values),
-                params[1].shape,
-            )
-
         if isinstance(other, SparseJacobian):
             subbed_jacobians = SparseJacobian.map_on_batch(
                 sub_fn,
@@ -182,7 +152,7 @@ class SparseJacobian:
             )
         else:
             subbed_jacobians = SparseJacobian.map_on_batch(
-                sub_sparse_dense,
+                lambda params: sub_fn([params[0], params[1].to_sparse()]),
                 list(zip(self.sparse_jacobians, other)),
                 self.batch_size,
             )
@@ -192,27 +162,7 @@ class SparseJacobian:
 
     def __mul__(self, other):
         def mul_fn(sparses):
-            print(sparses[0].is_sparse, sparses[1].is_sparse)
             return sparses[0] * sparses[1]
-
-        def mul_sparse_dense(params):
-            dummy_sparse = SparseJacobian._to_sparse(params[1]).coalesce()
-            values = dummy_sparse.values()
-            index0, index1 = dummy_sparse.indices()
-            indices1 = set(list(zip(index0.numpy().tolist(), index1.numpy().tolist())))
-            index0, index1 = params[0].coalesce().indices()
-            indices2 = set(list(zip(index0.numpy().tolist(), index1.numpy().tolist())))
-            final_indices = list(indices1 | indices2)
-            final_values = []
-            for index0, index1 in final_indices:
-                final_values.append(
-                    params[0][index0][index1] * dummy_sparse[index0][index1]
-                )
-            return SparseJacobian._get_sparse_typeclass(params[1][0])(
-                torch.tensor(list(zip(*final_indices))),
-                torch.tensor(final_values),
-                params[1].shape,
-            )
 
         if isinstance(other, SparseJacobian):
             multiplied_jacobians = SparseJacobian.map_on_batch(
@@ -223,7 +173,7 @@ class SparseJacobian:
         else:
             if len(getattr(other, "shape", [])) == 3:
                 multiplied_jacobians = SparseJacobian.map_on_batch(
-                    mul_sparse_dense,
+                    lambda params: params[0] * params[1].to_sparse(),
                     list(zip(self.sparse_jacobians, other)),
                     self.batch_size,
                 )

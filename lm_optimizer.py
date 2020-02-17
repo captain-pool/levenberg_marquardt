@@ -6,7 +6,7 @@ class LMOptimizer(object):
     def __init__(self, batch_size, parameters, damping=1):
         self._batch_size = batch_size
         self._parameters = parameters
-        self._flattened_parameters = self._flatten(self._parameters)
+        self._flattened_parameters = torch.flatten(self._parameters)
         self._damping = damping
 
     def _numel(self, tensor):
@@ -38,21 +38,17 @@ class LMOptimizer(object):
             )
             jac.append(grad_x.reshape(x.shape))
             grad_y[i] = 0.0
-        return torch.stack(jac).reshape([-1, self._numel(y), self._numel(x)])
+        return torch.stack(jac).reshape([-1, self._numel(y), x.numel()])
 
     def _pseudo_inverse(self, jacobian):
         jacobian = st.SparseJacobian.to_sparse_jacobian(jacobian)
         jacobian_abs = jacobian.T.matmul(jacobian)
-
-        marquardt = torch.eye(*jacobian_abs.shape).repeat(jacobian_abs.batch_size, 1)
-        if len(marquardt.shape) != 3:
-            marquardt = marquardt.unsqueeze(0)
-        marquardt = st.SparseJacobian.to_sparse_jacobian(marquardt)
+        marquardt = torch.eye(*jacobian_abs.shape)
         return (jacobian_abs + marquardt * self._damping).inverse().matmul(jacobian.T)
 
     def step(self, output_tensor):
         jacobian = self._get_jacobian(output_tensor)
         ps_inv = self._pseudo_inverse(jacobian)
-        self._flattened_parameters.data -= torch.squeeze(
-            ps_inv.matmul(torch.unsqueeze(output_tensor, -1), keep_dense=True), -1
-        )
+        batched_psj_vp = torch.squeeze(ps_inv.matmul(
+            torch.unsqueeze(output_tensor, -1), keep_dense=True))
+        self._flattened_parameters.data -= batched_psj_vp.mean(0)

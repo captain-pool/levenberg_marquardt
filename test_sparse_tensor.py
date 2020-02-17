@@ -6,7 +6,7 @@ class TestLevenbergMarquardt(absltest.TestCase):
     def setUp(self):
         self.jac1 = sparse_tensor.torch.rand(3, 4, 4)
         self.jac2 = sparse_tensor.torch.rand(3, 4, 4)
-
+        self.broadcast = sparse_tensor.torch.rand(4, 4)
     def test_to_sparse_jacobian(self):
         sparse_jacobian = sparse_tensor.SparseJacobian.to_sparse_jacobian(self.jac1)
         self.assertIsNotNone(sparse_jacobian)
@@ -33,7 +33,13 @@ class TestLevenbergMarquardt(absltest.TestCase):
             .numpy()
             .tolist()
         )
-
+    def test_add_broadcast(self):
+      sparse_jacobian1 = sparse_tensor.SparseJacobian.to_sparse_jacobian(self.jac1)
+      add_check = self.jac1 + self.broadcast
+      self.assertTrue(
+        sparse_tensor.torch.all(
+          add_check == (sparse_jacobian1 + self.broadcast).to_dense()
+      ))
     def test_sub_sparse(self):
         sparse_jacobian1 = sparse_tensor.SparseJacobian.to_sparse_jacobian(self.jac1)
         sparse_jacobian2 = sparse_tensor.SparseJacobian.to_sparse_jacobian(self.jac2)
