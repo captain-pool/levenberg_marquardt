@@ -6,7 +6,9 @@ class LMOptimizer(object):
     def __init__(self, batch_size, parameters, damping=1):
         self._batch_size = batch_size
         self._parameters = parameters
-        self._flattened_parameters = torch.flatten(self._parameters)
+        stacked_params = torch.stack(self._parameters)
+        self._param_shape = stacked_params.shape[::-1]
+        self._flattened_parameters = torch.flatten(stacked_params)
         self._damping = damping
 
     def _numel(self, tensor):
@@ -28,27 +30,35 @@ class LMOptimizer(object):
 
     def _get_jacobian(self, y, create_graph=False):
         jac = []
+        batched_jac = []
         flat_y = y.reshape(-1)
         x = self._parameters
         grad_y = torch.zeros_like(flat_y)
+        index0 = torch.tensor(list(range(self._param_shape[0])))
         for i in range(len(flat_y)):
             grad_y[i] = 1.0
             (grad_x,) = torch.autograd.grad(
-                flat_y, x, grad_y, retain_graph=True, create_graph=create_graph
+                flat_y, x[i % self._param_shape[1]], grad_y, retain_graph=True, create_graph=create_graph
             )
-            jac.append(grad_x.reshape(x.shape))
+            index1 = torch.tensor([i % self._param_shape[1]] * self._param_shape[0])
+            indices = torch.stack([index0, index1])
+            grad_jacobian_entry = torch.sparse.FloatTensor(indices, grad_x, self._param_shape)
+            jac.append(torch.cat(list(grad_jacobian_entry)))
+            if not (i + 1) % y.shape[1]:
+              batched_jac.append(torch.stack(jac))
+              jac = []
             grad_y[i] = 0.0
-        return torch.stack(jac).reshape([-1, self._numel(y), x.numel()])
+        return batched_jac
 
-    def _pseudo_inverse(self, jacobian):
-        jacobian = st.SparseJacobian.to_sparse_jacobian(jacobian)
+    def _pseudo_inverse(self, jacobians):
+        jacobian = st.SparseJacobian(len(jacobians), jacobians[0].shape, sparse_jacobians=jacobians)
         jacobian_abs = jacobian.T.matmul(jacobian)
         marquardt = torch.eye(*jacobian_abs.shape)
         return (jacobian_abs + marquardt * self._damping).inverse().matmul(jacobian.T)
 
     def step(self, output_tensor):
-        jacobian = self._get_jacobian(output_tensor)
-        ps_inv = self._pseudo_inverse(jacobian)
+        jacobians = self._get_jacobian(output_tensor)
+        ps_inv = self._pseudo_inverse(jacobians)
         batched_psj_vp = torch.squeeze(ps_inv.matmul(
             torch.unsqueeze(output_tensor, -1), keep_dense=True))
         self._flattened_parameters.data -= batched_psj_vp.mean(0)
