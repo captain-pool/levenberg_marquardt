@@ -10,9 +10,9 @@ def residual(theta, Y, X):
     return (Y - result)
 
 
-X = torch.rand(20, 10).normal_()
-theta = [torch.rand(10).normal_().requires_grad_(True) for _ in range(5)]
-Y = torch.rand(20, 5).normal_()
+X = torch.rand(2, 3).normal_()
+theta = [torch.rand(3).normal_().requires_grad_(True) for _ in range(2)]
+Y = torch.rand(2, 2).normal_()
 o = residual(theta, Y, X)
 opt = lm_optimizer.LMOptimizer(o.shape[0], theta, damping=0.13)
 x = 40

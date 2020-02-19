@@ -6,14 +6,14 @@ class LMOptimizer(object):
     def __init__(self, batch_size, parameters, damping=1):
         self._batch_size = batch_size
         self._parameters = parameters
-        stacked_params = torch.stack(self._parameters)
-        self._param_shape = stacked_params.shape[::-1]
-        self._flattened_parameters = torch.flatten(stacked_params)
+        self._stacked_params = torch.stack(self._parameters)
+        self._param_shape = self._stacked_params.shape[::-1]
+        self._flattened_parameters = torch.flatten(self._stacked_params)
         self._damping = damping
-
+        for i in range(len(self._parameters)):
+          self._parameters[i].data = self._stacked_params[i].data
     def _numel(self, tensor):
         return abs(tensor.numel() // self._batch_size)
-
     def _flatten(self, tensor):
         numel = self._numel(tensor)
         return tensor.reshape([self._batch_size, numel])
@@ -23,10 +23,13 @@ class LMOptimizer(object):
             if param.grad:
                 param.grad.detach_()
                 param.grad.zero_()
-        for param in self._parameters:
+        for param in self._stacked_params:
             if param.grad:
                 param.grad.detach_()
                 param.grad.zero_()
+        for param in self._parameters:
+          if param.grad:
+            param.grad.detach_().zero_()
 
     def _get_jacobian(self, y, create_graph=False):
         jac = []
@@ -62,3 +65,4 @@ class LMOptimizer(object):
         batched_psj_vp = torch.squeeze(ps_inv.matmul(
             torch.unsqueeze(output_tensor, -1), keep_dense=True))
         self._flattened_parameters.data -= batched_psj_vp.mean(0)
+
